@@ -50,6 +50,9 @@ export class AppService {
   }
 
 
+  
+
+
   async exchangeToken(): Promise<any> {
     const appId = process.env.META_APP_ID;
     const appSecret = process.env.META_APP_SECRET;
@@ -93,6 +96,40 @@ CLIENTE1_TOKEN=${longLivedToken}
     } catch (error) {
       console.error('❌ Error al intercambiar token:', error.response?.data || error.message);
       throw new InternalServerErrorException('No se pudo obtener el token largo');
+    }
+  }
+
+
+
+
+  async getAdCreatives(cliente: string) {
+    const clients = getMetaClients();
+    const client = clients[cliente];
+  
+    if (!client) {
+      throw new NotFoundException(`Cliente '${cliente}' no encontrado`);
+    }
+  
+    const { token, adAccountId } = client;
+  
+    try {
+      const response = await axios.get(`https://graph.facebook.com/v19.0/${adAccountId}/ads`, {
+        params: {
+          fields: 'name,creative{thumbnail_url,name}', // ✅ ESTA LÍNEA AHORA ESTÁ BIEN
+          access_token: token,
+          effective_status: ['ACTIVE', 'PAUSED'],
+          limit: 25,
+        },
+      });
+  
+      return response.data.data.map(ad => ({
+        ad_id: ad.id,
+        name: ad.name,
+        thumbnail_url: ad.creative?.thumbnail_url || null,
+      }));
+    } catch (error) {
+      console.error('❌ Error al obtener creatives:', error.response?.data || error.message);
+      throw new InternalServerErrorException('Error al consultar los creatives de Meta Ads');
     }
   }
 

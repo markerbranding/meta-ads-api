@@ -26,4 +26,11 @@ export class AppController {
   async exchangeToken() {
     return this.appService.exchangeToken();
   }
+
+  // Creatives para thumbs
+  @Get('ads/meta/:cliente/creatives')
+  async getCreatives(@Param('cliente') cliente: string) {
+    return this.appService.getAdCreatives(cliente);
+  }
+
 }
