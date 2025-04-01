@@ -8,46 +8,71 @@ import { getMetaClients } from './meta/config/meta-clients.config';
 
 @Injectable()
 export class AppService {
-  async getMetaAdsData(cliente: string, start?: string, end?: string): Promise<any> {
-    console.log('Desde .env:', process.env.CLIENTE1_TOKEN, process.env.CLIENTE1_ACCOUNT_ID);
-    const metaClients = getMetaClients(); // ✅ Esto lo evaluamos ya con .env cargado
-    const client = metaClients[cliente];
-    console.log('Cliente:', cliente);
-    console.log('Token:', client?.token);
-    console.log('Account ID:', client?.adAccountId);
+  async getMetaAdsData(cliente: string, start?: string, end?: string) {
+  const clients = getMetaClients();
+  const client = clients[cliente];
 
-    if (!client) {
-      throw new NotFoundException(`Cliente "${cliente}" no está configurado`);
-    }
-
-    const since = start || dayjs().subtract(7, 'day').format('YYYY-MM-DD');
-    const until = end || dayjs().format('YYYY-MM-DD');
-
-    const url = `https://graph.facebook.com/v19.0/${client.adAccountId}/insights`;
-
-    const params = {
-      access_token: client.token,
-      time_range: JSON.stringify({ since, until }),
-      fields: 'campaign_name,impressions,clicks,spend,cpc,ctr,date_start,date_stop',
-      level: 'campaign',
-    };
-
-    try {
-      const response = await axios.get(url, { params });
-      return response.data.data.map((item) => ({
-        campaign: item.campaign_name,
-        date: item.date_start,
-        impressions: parseInt(item.impressions, 10),
-        clicks: parseInt(item.clicks, 10),
-        spend: parseFloat(item.spend),
-        cpc: parseFloat(item.cpc),
-        ctr: parseFloat(item.ctr),
-      }));
-    } catch (error) {
-      console.error('Error al consultar Meta Ads:', error.response?.data || error.message);
-      throw new InternalServerErrorException('Error al consultar la API de Meta');
-    }
+  if (!client) {
+    throw new NotFoundException(`Cliente '${cliente}' no encontrado`);
   }
+
+  const { token, adAccountId } = client;
+
+  const today = dayjs().format('YYYY-MM-DD');
+  const startDate = start || dayjs().subtract(30, 'day').format('YYYY-MM-DD');
+  const endDate = end || today;
+
+  try {
+    const response = await axios.get(`https://graph.facebook.com/v19.0/${adAccountId}/ads`, {
+      params: {
+        fields: 'id,name,insights.time_increment(1){date_start,impressions,clicks,spend,cpc,ctr}',
+        access_token: token,
+        effective_status: ['ACTIVE', 'PAUSED'],
+        limit: 100,
+      },
+    });
+
+    const ads = response.data.data;
+
+    const results: {
+      ad_id: string;
+      campaign: string;
+      date: string;
+      impressions: number;
+      clicks: number;
+      spend: number;
+      cpc: number;
+      ctr: number;
+    }[] = [];
+
+    for (const ad of ads) {
+      const insights = ad.insights?.data || [];
+
+      insights.forEach((entry) => {
+        const { date_start, impressions, clicks, spend, cpc, ctr } = entry;
+        const entryDate = date_start;
+
+        if (entryDate >= startDate && entryDate <= endDate) {
+          results.push({
+            ad_id: ad.id,
+            campaign: ad.name,
+            date: entryDate,
+            impressions: parseInt(impressions),
+            clicks: parseInt(clicks),
+            spend: parseFloat(spend),
+            cpc: parseFloat(cpc),
+            ctr: parseFloat(ctr),
+          });
+        }
+      });
+    }
+
+    return results;
+  } catch (error) {
+    console.error('❌ Error al consultar Meta Ads:', JSON.stringify(error.response?.data || error.message));
+    throw new InternalServerErrorException('Error al consultar la API de Meta');
+  }
+}
 
 
   
