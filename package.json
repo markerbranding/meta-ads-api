@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "prebuild": "npm install -g @nestjs/cli",
-    "build": "nest build",
+    "build": "echo '🔧 Instalando dependencias...' && npm install && nest build",
     "start": "node dist/main.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start:dev": "nest start --watch",
