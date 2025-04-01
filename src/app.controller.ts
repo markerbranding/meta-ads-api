@@ -5,7 +5,12 @@ import { AppService } from './app.service';
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
-  @Get(':cliente')
+  @Get()
+  getRoot() {
+    return { message: 'API Meta Ads activa ✅' };
+  }
+
+  @Get('ads/meta/:cliente')
   async getMetaData(
     @Param('cliente') cliente: string,
     @Query('start') start?: string,
