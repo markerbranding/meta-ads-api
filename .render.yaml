@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: meta-ads-api
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIENTE1_TOKEN
+        value: EAAB... (token largo)
+      - key: CLIENTE1_ACCOUNT_ID
+        value: act_330413179415131
+      - key: META_APP_ID
+        value: tu_app_id
+      - key: META_APP_SECRET
+        value: tu_app_secret
+      - key: META_SHORT_LIVED_TOKEN
+        value: EAAB... (solo si quieres seguir renovando token desde backend)
