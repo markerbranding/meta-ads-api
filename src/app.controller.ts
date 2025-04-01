@@ -1,16 +1,18 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { AppService } from './app.service';
 
-@Controller('ads/meta')
+@Controller()
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
+  // Ruta raíz: /
   @Get()
   getRoot() {
     return { message: 'API Meta Ads activa ✅' };
   }
 
-  @Get(':cliente')
+  // Ruta para obtener campañas: /ads/meta/:cliente
+  @Get('ads/meta/:cliente')
   async getMetaData(
     @Param('cliente') cliente: string,
     @Query('start') start?: string,
@@ -18,13 +20,10 @@ export class AppController {
   ) {
     return this.appService.getMetaAdsData(cliente, start, end);
   }
-  
-  @Get('exchange-token')
+
+  // Ruta para intercambiar token: /ads/meta/exchange-token
+  @Get('ads/meta/exchange-token')
   async exchangeToken() {
     return this.appService.exchangeToken();
   }
-
-
 }
-
-
