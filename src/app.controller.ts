@@ -10,7 +10,7 @@ export class AppController {
     return { message: 'API Meta Ads activa ✅' };
   }
 
-  @Get('ads/meta/:cliente')
+  @Get(':cliente')
   async getMetaData(
     @Param('cliente') cliente: string,
     @Query('start') start?: string,
