@@ -25,7 +25,7 @@ export class AppService {
     try {
       const response = await axios.get(`https://graph.facebook.com/v19.0/${adAccountId}/ads`, {
         params: {
-          fields: `id,name,created_time,updated_time,insights.time_range({since:'${startDate}',until:'${endDate}'}){impressions,clicks,spend,cpc,ctr}`,
+          fields: `id,name,campaign_id,created_time,updated_time,insights.time_range({since:'${startDate}',until:'${endDate}'}){impressions,clicks,spend,cpc,ctr,actions,cost_per_action_type}`,
           access_token: token,
           effective_status: ['ACTIVE', 'PAUSED'],
           limit: 100,
@@ -37,7 +37,8 @@ export class AppService {
       const results: {
         ad_id: string;
         campaign: string;
-        date: string;
+        campaign_id: string;
+        rango_fechas: string;
         created_time: string;
         updated_time: string;
         impressions: number;
@@ -45,23 +46,70 @@ export class AppService {
         spend: number;
         cpc: number;
         ctr: number;
+        leads: number;
+        cpa_lead: number;
+        objective?: string; // <- lo preparamos para el siguiente paso
       }[] = [];
+
+      const campaignIdsSet = new Set<string>();
+      ads.forEach(ad => {
+        if (ad.campaign_id) {
+          campaignIdsSet.add(ad.campaign_id);
+        }
+      });
+      const campaignIds = Array.from(campaignIdsSet);
+
+
+      const campaignObjectives: Record<string, string> = {};
+
+      if (campaignIds.length > 0) {
+        const campaignResponse = await axios.get(`https://graph.facebook.com/v19.0`, {
+          params: {
+            ids: campaignIds.join(','),
+            fields: 'objective',
+            access_token: token,
+          },
+        });
+
+        const campaignData = campaignResponse.data;
+        for (const campaignId of campaignIds) {
+          campaignObjectives[campaignId] = campaignData[campaignId]?.objective || '';
+        }
+      }
+
+      const objectiveMap: Record<string, string> = {
+        LEAD_GENERATION: 'Clientes potenciales',
+        REACH: 'Alcance',
+        LINK_CLICKS: 'Clics en enlace',
+        CONVERSIONS: 'Conversiones',
+        // Agrega más según tus campañas
+      };
   
       for (const ad of ads) {
         const insights = ad.insights?.data?.[0];
         if (!insights) continue;
+
+        const actions = insights.actions || [];
+        const costPerAction = insights.cost_per_action_type || [];
+
+        const leads = actions.find(a => a.action_type === 'lead')?.value || 0;
+        const costPerLead = costPerAction.find(a => a.action_type === 'lead')?.value || 0;
   
         results.push({
           ad_id: ad.id,
           campaign: ad.name,
-          date: `${startDate} a ${endDate}`,
+          campaign_id: ad.campaign_id,
           created_time: ad.created_time,
           updated_time: ad.updated_time,
+          rango_fechas: `${startDate} a ${endDate}`,
           impressions: parseInt(insights.impressions),
           clicks: parseInt(insights.clicks),
           spend: parseFloat(insights.spend),
           cpc: parseFloat(insights.cpc),
           ctr: parseFloat(insights.ctr),
+          leads: parseInt(leads),
+          cpa_lead: parseFloat(costPerLead),
+          objective: objectiveMap[campaignObjectives[ad.campaign_id]] || campaignObjectives[ad.campaign_id] || '',
         });
       }
   
@@ -98,9 +146,9 @@ export class AppService {
       const expireDate = dayjs().add(expiresIn, 'second').format('YYYY-MM-DD');
 
       const content = `# Generado automáticamente el ${dayjs().format('YYYY-MM-DD')}
-CLIENTE1_TOKEN=${longLivedToken}
-# Expira el ${expireDate}
-`;
+      CLIENTE1_TOKEN=${longLivedToken}
+      # Expira el ${expireDate}
+      `;
 
       const envPath = path.resolve(__dirname, '../.env.generated');
 
