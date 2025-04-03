@@ -43,4 +43,17 @@ export class AppController {
     return this.appService.getPageInsights(cliente, start, end);
   }
 
+  //  Automatizar Token
+  @Get('ads/meta/refresh-page-token')
+  async refreshPageToken() {
+    return this.appService.refreshPageToken();
+  }
+
+
+  // Renovación manual de tokens:
+  @Get('test-direct-exchange')
+  async testExchangeDirect() {
+    return this.appService.exchangeToken();
+  }
+
 }

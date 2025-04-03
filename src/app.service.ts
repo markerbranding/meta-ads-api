@@ -4,10 +4,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as dayjs from 'dayjs';
 import { getMetaClients } from './meta/config/meta-clients.config';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import * as nodemailer from 'nodemailer';
 
 
 @Injectable()
 export class AppService {
+
+
+  // Obtener data de Meta Ads:
   async getMetaAdsData(cliente: string, start?: string, end?: string) {
     const clients = getMetaClients();
     const client = clients[cliente];
@@ -142,12 +147,11 @@ export class AppService {
 
   
 
-
+  // Crear token de mayor duración (60 días):
   async exchangeToken(): Promise<any> {
     const appId = process.env.META_APP_ID;
     const appSecret = process.env.META_APP_SECRET;
     const shortLivedToken = process.env.META_SHORT_LIVED_TOKEN;
-
     const url = 'https://graph.facebook.com/v19.0/oauth/access_token';
 
     try {
@@ -159,13 +163,17 @@ export class AppService {
           fb_exchange_token: shortLivedToken,
         },
       });
+    
 
       const longLivedToken = response.data.access_token;
-      const expiresIn = response.data.expires_in;
-      const expireDate = dayjs().add(expiresIn, 'second').format('YYYY-MM-DD');
+      const defaultExpiresIn = 60 * 24 * 60 * 60; // 60 días en segundos
+      const expireDate = dayjs().add(defaultExpiresIn, 'second').format('YYYY-MM-DD');
+
+      console.log(`⚠️ expires_in no recibido, usando duración estimada de 60 días → Expira el: ${expireDate}`);
 
       const content = `# Generado automáticamente el ${dayjs().format('YYYY-MM-DD')}
       CLIENTE1_TOKEN=${longLivedToken}
+      CLIENTE1_TOKEN_EXPIRES_AT=${expireDate}
       # Expira el ${expireDate}
       `;
 
@@ -176,10 +184,12 @@ export class AppService {
       console.log('\n✅ Nuevo token guardado en .env.generated');
       console.log(`💡 Expira el: ${expireDate}\n`);
 
+      await this.updateRenderEnvVars(longLivedToken, expireDate);
+
       return {
         message: 'Token generado correctamente',
         token: longLivedToken,
-        expiresInDays: Math.round(expiresIn / 86400),
+        expiresInDays: 60, // asumimos 60 días porque es un token de larga duración
         expiresAt: expireDate,
         savedTo: envPath,
       };
@@ -191,7 +201,7 @@ export class AppService {
 
 
 
-
+  // Imágenes en Meta Ads
   async getAdCreatives(cliente: string) {
     const clients = getMetaClients();
     const client = clients[cliente];
@@ -229,7 +239,7 @@ export class AppService {
 
 
 
-
+  // Facebook Insights:
   async getPageInsights(cliente: string, start?: string, end?: string) {
     const clients = getMetaClients();
     const client = clients[cliente];
@@ -256,45 +266,56 @@ export class AppService {
       mes: string;
       seguidores_totales: number | string;
       nuevos_seguidores: number | string;
+      nuevos_seguidores_brutos: number | string;
       publicaciones: number | string;
-      likes_pagina: number | string;
       impresiones_totales: number | string;
       impresiones_pagadas: number | string;
-      impresiones_organicas: number | string;
       alcance_total: number | string;
       alcance_pagado: number | string;
-      alcance_organico: number | string;
       rango_ajustado?: boolean;
     }[] = [];
   
-    const metrics = [
-      'page_fans',
-      'page_fan_adds_unique',
-      'page_impressions',
-      'page_impressions_paid',
-      'page_impressions_organic',
-      'page_impressions_unique',
-      'page_impressions_paid_unique',
-      'page_impressions_organic_unique',
-    ];
-  
-    const getMonthlyMetric = async (metric: string, since: string, until: string) => {
+    const getMetricLastValue = async (metric: string, since: string, until: string) => {
       try {
         const url = `https://graph.facebook.com/v19.0/${pageId}/insights/${metric}`;
         const response = await axios.get(url, {
-          params: {
-            access_token: pageToken,
-            since,
-            until,
-          },
+          params: { access_token: pageToken, since, until },
         });
-  
         const values = response.data?.data?.[0]?.values;
         if (Array.isArray(values) && values.length > 0) {
-          const lastValue = values[values.length - 1].value;
-          return typeof lastValue === 'number' ? lastValue : parseInt(lastValue) || 0;
+          const last = values[values.length - 1]?.value;
+          return typeof last === 'number' ? last : parseInt(last) || 0;
         }
         return 'No disponible';
+      } catch (error) {
+        console.error(`❌ Métrica fallida '${metric}' (${since} - ${until}):`, error.response?.data || error.message);
+        return 'No disponible';
+      }
+    };
+  
+    const getMetricSum = async (metric: string, since: string, until: string) => {
+      try {
+        const url = `https://graph.facebook.com/v19.0/${pageId}/insights/${metric}`;
+        const response = await axios.get(url, {
+          params: { access_token: pageToken, since, until },
+        });
+    
+        const values = response.data?.data?.[0]?.values;
+    
+        if (!Array.isArray(values) || values.length === 0) return 'No disponible';
+    
+        const total = values.reduce((sum, v) => {
+          const val = v.value;
+          if (typeof val === 'number') return sum + val;
+          if (typeof val === 'object') {
+            const paid = parseInt(val.paid) || 0;
+            const unpaid = parseInt(val.unpaid) || 0;
+            return sum + paid + unpaid;
+          }
+          return sum;
+        }, 0);
+    
+        return total;
       } catch (error) {
         console.error(`❌ Métrica fallida '${metric}' (${since} - ${until}):`, error.response?.data || error.message);
         return 'No disponible';
@@ -312,7 +333,6 @@ export class AppService {
             limit: 100,
           },
         });
-  
         return response.data?.data?.length || 0;
       } catch (error) {
         console.error(`❌ Error al contar posts (${since} - ${until}):`, error.response?.data || error.message);
@@ -321,54 +341,190 @@ export class AppService {
     };
   
     let current = startDate;
-
+  
     while (current.isBefore(endDate) || current.isSame(endDate, 'month')) {
       const since = current.startOf('month').format('YYYY-MM-DD');
       const until = current.endOf('month').format('YYYY-MM-DD');
       const mes = current.format('YYYY-MM');
-
+  
       const [
-        fans,
-        nuevos,
-        impTotal,
-        impPagadas,
-        impOrganicas,
-        alcanceTotal,
-        alcancePagado,
-        alcanceOrganico,
+        seguidores_totales,
+        nuevos_seguidores,
+        impresiones_totales,
+        impresiones_pagadas,
+        alcance_total,
+        alcance_pagado,
         publicaciones,
+        nuevos_seguidores_brutos
       ] = await Promise.all([
-        getMonthlyMetric('page_fans', since, until),
-        getMonthlyMetric('page_fan_adds_unique', since, until),
-        getMonthlyMetric('page_impressions', since, until),
-        getMonthlyMetric('page_impressions_paid', since, until),
-        getMonthlyMetric('page_impressions_organic', since, until),
-        getMonthlyMetric('page_impressions_unique', since, until),
-        getMonthlyMetric('page_impressions_paid_unique', since, until),
-        getMonthlyMetric('page_impressions_organic_unique', since, until),
+        getMetricLastValue('page_fans', since, until),
+        getMetricSum('page_fan_adds_by_paid_non_paid_unique', since, until),
+        getMetricSum('page_impressions', since, until),
+        getMetricSum('page_impressions_paid', since, until),
+        getMetricSum('page_impressions_unique', since, until),
+        getMetricSum('page_impressions_paid_unique', since, until),
         getMonthlyPosts(since, until),
+        getMetricSum('page_fan_adds', since, until)
       ]);
-
+  
       monthlyData.push({
         cliente,
         mes,
-        seguidores_totales: fans,
-        nuevos_seguidores: nuevos,
+        seguidores_totales,
+        nuevos_seguidores,
         publicaciones,
-        likes_pagina: nuevos,
-        impresiones_totales: impTotal,
-        impresiones_pagadas: impPagadas,
-        impresiones_organicas: impOrganicas,
-        alcance_total: alcanceTotal,
-        alcance_pagado: alcancePagado,
-        alcance_organico: alcanceOrganico,
+        nuevos_seguidores_brutos,
+        impresiones_totales,
+        impresiones_pagadas,
+        alcance_total,
+        alcance_pagado,
         ...(rangoAjustado && { rango_ajustado: true }),
       });
-
+  
       current = current.add(1, 'month');
     }
   
     return monthlyData;
+  }
+
+
+
+
+
+  // Automatización del token:
+  async refreshPageToken() {
+    const appId = process.env.META_APP_ID;
+    const appSecret = process.env.META_APP_SECRET;
+    const shortLivedToken = process.env.META_SHORT_LIVED_TOKEN;
+    const url = 'https://graph.facebook.com/v19.0/oauth/access_token';
+  
+    try {
+      const response = await axios.get(url, {
+        params: {
+          grant_type: 'fb_exchange_token',
+          client_id: appId,
+          client_secret: appSecret,
+          fb_exchange_token: shortLivedToken,
+        },
+      });
+  
+      const longLivedToken = response.data.access_token;
+      const expiresIn = response.data.expires_in;
+      const expireDate = dayjs().add(expiresIn, 'second').format('YYYY-MM-DD');
+  
+      // 1️⃣ Guardamos el token en .env.generated
+      const content = `# Actualizado el ${dayjs().format('YYYY-MM-DD')}
+  CLIENTE1_PAGE_TOKEN=${longLivedToken}
+  CLIENTE1_TOKEN_EXPIRES_AT=${expireDate}
+  # Expira el ${expireDate}
+  `;
+  
+      const envPath = path.resolve(__dirname, '../.env.generated');
+      fs.writeFileSync(envPath, content);
+  
+      console.log('✅ Token de página guardado en .env.generated');
+  
+      // 2️⃣ Subimos a variables de entorno en Render
+      await this.updateRenderEnvVars(longLivedToken, expireDate);
+  
+      return {
+        token: longLivedToken,
+        expiresAt: expireDate,
+      };
+    } catch (error) {
+      console.error('❌ Error al renovar token de página:', error.response?.data || error.message);
+      throw new InternalServerErrorException('No se pudo renovar el token de página');
+    }
+  }
+
+
+  // Agendar que se genere nuevo token cada semana:
+  @Cron(CronExpression.EVERY_WEEK)
+  async autoRefreshPageToken() {
+    console.log('🔁 Ejecutando tarea automática de refresh de token de página');
+    try {
+      const result = await this.refreshPageToken();
+      const msg = `✅ Token de página actualizado correctamente.\n\nCliente: cliente1\nExpira el: ${result.expiresAt}`;
+      await this.sendEmail('✅ Token Meta actualizado', msg);
+    } catch (error) {
+      const errorMsg = `❌ Error al actualizar token de página: ${error.message}`;
+      console.error(errorMsg);
+      await this.sendEmail('❌ Fallo en actualización de token Meta', errorMsg);
+    }
+  }
+
+
+
+
+  
+  // Enviar correo tras actualizar el token:
+  async sendEmail(subject: string, text: string) {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail', // o 'hotmail', 'outlook', etc.
+      auth: {
+        user: process.env.EMAIL_USER, // tu correo
+        pass: process.env.EMAIL_PASS, // tu app password o contraseña
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"Meta Ads API" <${process.env.EMAIL_USER}>`,
+      to: process.env.NOTIFY_EMAIL || process.env.EMAIL_USER,
+      subject,
+      text,
+    });
+
+    console.log('📩 Correo enviado:', subject);
+  }
+
+
+
+
+
+
+  // Subir a render.com:
+  private async updateRenderEnvVars(newToken: string, newExpiresAt: string): Promise<void> {
+    const apiKey = process.env.RENDER_API_KEY;
+    const serviceId = process.env.RENDER_SERVICE_ID;
+    const url = `https://api.render.com/v1/services/${serviceId}/env-vars`;
+  
+    try {
+      const { data: existingVars } = await axios.get(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+  
+      const varsMap: Record<string, string> = {};
+  
+      for (const env of existingVars) {
+        if (env.key && env.value !== undefined) {
+          varsMap[env.key] = env.value;
+        }
+      }
+  
+      if (!newToken || !newExpiresAt) {
+        throw new Error('Token o fecha de expiración están vacíos');
+      }
+  
+      // ⚠️ Agregamos los nuevos valores
+      varsMap['CLIENTE1_PAGE_TOKEN'] = newToken;
+      varsMap['CLIENTE1_TOKEN_EXPIRES_AT'] = newExpiresAt;
+  
+      const updatedVars = Object.entries(varsMap)
+        .filter(([key, value]) => key && value) // filtra valores válidos
+        .map(([key, value]) => ({ key, value }));
+  
+      await axios.put(url, updatedVars, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+  
+      console.log('✅ Variables actualizadas en Render');
+    } catch (error) {
+      console.error('❌ Error al actualizar variables en Render:', error.response?.data || error.message);
+      throw new Error('No se pudo actualizar Render');
+    }
   }
 
 
