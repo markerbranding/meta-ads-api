@@ -25,7 +25,7 @@ export class AppService {
     try {
       const response = await axios.get(`https://graph.facebook.com/v19.0/${adAccountId}/ads`, {
         params: {
-          fields: `id,name,campaign_id,created_time,updated_time,insights.time_range({since:'${startDate}',until:'${endDate}'}){impressions,clicks,spend,cpc,ctr,actions,cost_per_action_type}`,
+          fields: `id,name,campaign_id,created_time,updated_time,insights.time_range({since:'${startDate}',until:'${endDate}'}){impressions,reach,clicks,spend,cpc,ctr,actions,cost_per_action_type}`,
           access_token: token,
           effective_status: ['ACTIVE', 'PAUSED'],
           limit: 100,
@@ -42,6 +42,7 @@ export class AppService {
         created_time: string;
         updated_time: string;
         impressions: number;
+        reach: number;
         clicks: number;
         spend: number;
         cpc: number;
@@ -119,6 +120,7 @@ export class AppService {
           created_time: ad.created_time,
           updated_time: ad.updated_time,
           rango_fechas: `${startDate} a ${endDate}`,
+          reach: parseInt(insights.reach),
           impressions: parseInt(insights.impressions),
           clicks: parseInt(insights.clicks),
           spend: parseFloat(insights.spend),
