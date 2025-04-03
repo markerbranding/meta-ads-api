@@ -124,8 +124,8 @@ export class AppService {
           spend: parseFloat(insights.spend),
           cpc: parseFloat(insights.cpc),
           ctr: parseFloat(insights.ctr),
-          leads: parseInt(leads),
-          cpa_lead: parseFloat(costPerLead),
+          leads,
+          cpa_lead: costPerLead,
           objective: objectiveMap[campaignObjectives[ad.campaign_id]] || campaignObjectives[ad.campaign_id] || '',
         });
       }
