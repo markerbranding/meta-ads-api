@@ -234,14 +234,34 @@ export class AppService {
     const clients = getMetaClients();
     const client = clients[cliente];
   
-    if (!client || !client.pageId) {
-      throw new NotFoundException(`Cliente '${cliente}' o 'pageId' no encontrado`);
+    if (!client || !client.pageId || !client.pageToken) {
+      throw new NotFoundException(`Cliente '${cliente}' o 'pageId/pageToken' no encontrado`);
     }
   
     const { pageToken, pageId } = client;
   
-    const startDate = start || dayjs().subtract(30, 'day').format('YYYY-MM-DD');
-    const endDate = end || dayjs().format('YYYY-MM-DD');
+    const fechaLimite = dayjs().subtract(90, 'day').startOf('day');
+    let startDate = dayjs(start || fechaLimite).startOf('month');
+    const endDate = dayjs(end || dayjs()).endOf('month');
+  
+    let rangoAjustado = false;
+  
+    if (startDate.isBefore(fechaLimite)) {
+      startDate = fechaLimite;
+      rangoAjustado = true;
+    }
+  
+    const monthlyData: {
+      cliente: string;
+      mes: string;
+      seguidores_totales: number | string;
+      nuevos_seguidores: number | string;
+      publicaciones: number | string;
+      likes_pagina: number | string;
+      impresiones_totales: number | string;
+      alcance_total: number | string;
+      rango_ajustado?: boolean;
+    }[] = [];
   
     const metrics = [
       'page_fans',
@@ -250,60 +270,74 @@ export class AppService {
       'page_impressions_unique',
     ];
   
-    const results: any = {};
+    const getMonthlyMetric = async (metric: string, since: string, until: string) => {
+      try {
+        const url = `https://graph.facebook.com/v19.0/${pageId}/insights/${metric}`;
+        const response = await axios.get(url, {
+          params: {
+            access_token: pageToken,
+            since,
+            until,
+          },
+        });
   
-    try {
-      for (const metric of metrics) {
-        try {
-          const url = `https://graph.facebook.com/v19.0/${pageId}/insights/${metric}`;
-          const response = await axios.get(url, {
-            params: {
-              access_token: pageToken,
-              since: startDate,
-              until: endDate,
-            },
-          });
-      
-          const data = response.data?.data?.[0];
-          if (data?.name === 'page_impressions_by_age_gender_unique') {
-            results[metric] = data?.values?.[0]?.value || {};
-          } else {
-            results[metric] = data?.values?.[0]?.value || 0;
-          }
-        } catch (error) {
-          console.error(`❌ Error al consultar métrica '${metric}':`, error.response?.data || error.message);
-          results[metric] = 'ERROR';
-        }
+        return response.data?.data?.[0]?.values?.[0]?.value || 0;
+      } catch (error) {
+        console.error(`❌ Métrica fallida '${metric}' (${since} - ${until}):`, error.response?.data || error.message);
+        return 'No disponible';
       }
+    };
   
-      // Obtener número de posts publicados
-      const postsResp = await axios.get(`https://graph.facebook.com/v19.0/${pageId}/posts`, {
-        params: {
-          access_token: pageToken,
-          since: startDate,
-          until: endDate,
-          fields: 'id',
-          limit: 100,
-        },
+    const getMonthlyPosts = async (since: string, until: string) => {
+      try {
+        const response = await axios.get(`https://graph.facebook.com/v19.0/${pageId}/posts`, {
+          params: {
+            access_token: pageToken,
+            since,
+            until,
+            fields: 'id',
+            limit: 100,
+          },
+        });
+  
+        return response.data?.data?.length || 0;
+      } catch (error) {
+        console.error(`❌ Error al contar posts (${since} - ${until}):`, error.response?.data || error.message);
+        return 'No disponible';
+      }
+    };
+  
+    let current = startDate;
+  
+    while (current.isBefore(endDate) || current.isSame(endDate, 'month')) {
+      const since = current.startOf('month').format('YYYY-MM-DD');
+      const until = current.endOf('month').format('YYYY-MM-DD');
+      const mes = current.format('YYYY-MM');
+  
+      const [fans, nuevos, impresiones, alcance, publicaciones] = await Promise.all([
+        getMonthlyMetric('page_fans', since, until),
+        getMonthlyMetric('page_fan_adds_unique', since, until),
+        getMonthlyMetric('page_impressions', since, until),
+        getMonthlyMetric('page_impressions_unique', since, until),
+        getMonthlyPosts(since, until),
+      ]);
+  
+      monthlyData.push({
+        cliente,
+        mes,
+        seguidores_totales: fans,
+        nuevos_seguidores: nuevos,
+        publicaciones,
+        likes_pagina: nuevos,
+        impresiones_totales: impresiones,
+        alcance_total: alcance,
+        ...(rangoAjustado && { rango_ajustado: true }),
       });
   
-      results.page_posts = postsResp.data?.data?.length || 0;
-  
-      return {
-        cliente,
-        rango_fechas: `${startDate} a ${endDate}`,
-        seguidores_totales: results.page_fans,
-        nuevos_seguidores: results.page_fan_adds_unique,
-        publicaciones: results.page_posts,
-        likes_pagina: results.page_fan_adds_unique, // Meta ya no separa "likes" y "follows" en muchas cuentas
-        impresiones_totales: results.page_impressions,
-        alcance_total: results.page_impressions_unique,
-        alcance_por_genero_edad: results.page_impressions_by_age_gender_unique,
-      };
-    } catch (error) {
-      console.error('❌ Error al consultar Page Insights:', error.response?.data || error.message);
-      throw new InternalServerErrorException('Error al consultar métricas de la página de Facebook');
+      current = current.add(1, 'month');
     }
+  
+    return monthlyData;
   }
 
 
