@@ -267,7 +267,7 @@ export class AppService {
       'page_fans',
       'page_fan_adds_unique',
       'page_impressions',
-      'page_impressions_unique',
+      'page_total_reach',
     ];
   
     const getMonthlyMetric = async (metric: string, since: string, until: string) => {
@@ -318,7 +318,7 @@ export class AppService {
         getMonthlyMetric('page_fans', since, until),
         getMonthlyMetric('page_fan_adds_unique', since, until),
         getMonthlyMetric('page_impressions', since, until),
-        getMonthlyMetric('page_impressions_unique', since, until),
+        getMonthlyMetric('page_total_reach', since, until),
         getMonthlyPosts(since, until),
       ]);
   
