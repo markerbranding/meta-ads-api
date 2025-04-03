@@ -104,8 +104,11 @@ export class AppService {
           'onsite_conversion.lead_grouped',
         ];
 
-        const leads = actions.find(a => leadActionTypes.includes(a.action_type))?.value || 0;
-        const costPerLead = costPerAction.find(a => leadActionTypes.includes(a.action_type))?.value || 0;
+        const leadsRaw = actions.find(a => leadActionTypes.includes(a.action_type))?.value;
+        const costPerLeadRaw = costPerAction.find(a => leadActionTypes.includes(a.action_type))?.value;
+
+        const leads = leadsRaw ? parseFloat(leadsRaw) : 0;
+        const costPerLead = costPerLeadRaw ? parseFloat(costPerLeadRaw) : 0;
 
 
         
