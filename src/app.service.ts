@@ -79,6 +79,11 @@ export class AppService {
 
       const objectiveMap: Record<string, string> = {
         LEAD_GENERATION: 'Clientes potenciales',
+        OUTCOME_LEADS: 'Clientes potenciales',
+        OUTCOME_TRAFFIC: 'Tráfico',
+        OUTCOME_ENGAGEMENT: 'Interacción',
+        OUTCOME_SALES: 'Ventas',
+        OUTCOME_AWARENESS: 'Alcance',
         REACH: 'Alcance',
         LINK_CLICKS: 'Clics en enlace',
         CONVERSIONS: 'Conversiones',
@@ -92,9 +97,18 @@ export class AppService {
         const actions = insights.actions || [];
         const costPerAction = insights.cost_per_action_type || [];
 
-        const leads = actions.find(a => a.action_type === 'lead')?.value || 0;
-        const costPerLead = costPerAction.find(a => a.action_type === 'lead')?.value || 0;
-  
+        const leadActionTypes = [
+          'lead',
+          'offsite_conversion.fb_pixel_lead',
+          'omni_lead',
+          'onsite_conversion.lead_grouped',
+        ];
+
+        const leads = actions.find(a => leadActionTypes.includes(a.action_type))?.value || 0;
+        const costPerLead = costPerAction.find(a => leadActionTypes.includes(a.action_type))?.value || 0;
+
+
+        
         results.push({
           ad_id: ad.id,
           campaign: ad.name,
