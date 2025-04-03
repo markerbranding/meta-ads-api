@@ -289,7 +289,12 @@ export class AppService {
           },
         });
   
-        return response.data?.data?.[0]?.values?.[0]?.value || 0;
+        const values = response.data?.data?.[0]?.values;
+        if (Array.isArray(values) && values.length > 0) {
+          const lastValue = values[values.length - 1].value;
+          return typeof lastValue === 'number' ? lastValue : parseInt(lastValue) || 0;
+        }
+        return 'No disponible';
       } catch (error) {
         console.error(`❌ Métrica fallida '${metric}' (${since} - ${until}):`, error.response?.data || error.message);
         return 'No disponible';
