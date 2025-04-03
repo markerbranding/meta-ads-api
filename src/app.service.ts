@@ -259,7 +259,11 @@ export class AppService {
       publicaciones: number | string;
       likes_pagina: number | string;
       impresiones_totales: number | string;
+      impresiones_pagadas: number | string;
+      impresiones_organicas: number | string;
       alcance_total: number | string;
+      alcance_pagado: number | string;
+      alcance_organico: number | string;
       rango_ajustado?: boolean;
     }[] = [];
   
@@ -267,7 +271,11 @@ export class AppService {
       'page_fans',
       'page_fan_adds_unique',
       'page_impressions',
-      'page_total_reach',
+      'page_impressions_paid',
+      'page_impressions_organic',
+      'page_impressions_unique',
+      'page_impressions_paid_unique',
+      'page_impressions_organic_unique',
     ];
   
     const getMonthlyMetric = async (metric: string, since: string, until: string) => {
@@ -308,20 +316,34 @@ export class AppService {
     };
   
     let current = startDate;
-  
+
     while (current.isBefore(endDate) || current.isSame(endDate, 'month')) {
       const since = current.startOf('month').format('YYYY-MM-DD');
       const until = current.endOf('month').format('YYYY-MM-DD');
       const mes = current.format('YYYY-MM');
-  
-      const [fans, nuevos, impresiones, alcance, publicaciones] = await Promise.all([
+
+      const [
+        fans,
+        nuevos,
+        impTotal,
+        impPagadas,
+        impOrganicas,
+        alcanceTotal,
+        alcancePagado,
+        alcanceOrganico,
+        publicaciones,
+      ] = await Promise.all([
         getMonthlyMetric('page_fans', since, until),
         getMonthlyMetric('page_fan_adds_unique', since, until),
         getMonthlyMetric('page_impressions', since, until),
-        getMonthlyMetric('page_total_reach', since, until),
+        getMonthlyMetric('page_impressions_paid', since, until),
+        getMonthlyMetric('page_impressions_organic', since, until),
+        getMonthlyMetric('page_impressions_unique', since, until),
+        getMonthlyMetric('page_impressions_paid_unique', since, until),
+        getMonthlyMetric('page_impressions_organic_unique', since, until),
         getMonthlyPosts(since, until),
       ]);
-  
+
       monthlyData.push({
         cliente,
         mes,
@@ -329,11 +351,15 @@ export class AppService {
         nuevos_seguidores: nuevos,
         publicaciones,
         likes_pagina: nuevos,
-        impresiones_totales: impresiones,
-        alcance_total: alcance,
+        impresiones_totales: impTotal,
+        impresiones_pagadas: impPagadas,
+        impresiones_organicas: impOrganicas,
+        alcance_total: alcanceTotal,
+        alcance_pagado: alcancePagado,
+        alcance_organico: alcanceOrganico,
         ...(rangoAjustado && { rango_ajustado: true }),
       });
-  
+
       current = current.add(1, 'month');
     }
   
