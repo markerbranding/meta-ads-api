@@ -223,4 +223,90 @@ export class AppService {
     }
   }
 
+
+
+
+
+
+
+
+  async getPageInsights(cliente: string, start?: string, end?: string) {
+    const clients = getMetaClients();
+    const client = clients[cliente];
+  
+    if (!client || !client.pageId) {
+      throw new NotFoundException(`Cliente '${cliente}' o 'pageId' no encontrado`);
+    }
+  
+    const { pageToken, pageId } = client;
+  
+    const startDate = start || dayjs().subtract(30, 'day').format('YYYY-MM-DD');
+    const endDate = end || dayjs().format('YYYY-MM-DD');
+  
+    const metrics = [
+      'page_fans',
+      'page_fan_adds_unique',
+      'page_impressions',
+      'page_impressions_unique',
+    ];
+  
+    const results: any = {};
+  
+    try {
+      for (const metric of metrics) {
+        try {
+          const url = `https://graph.facebook.com/v19.0/${pageId}/insights/${metric}`;
+          const response = await axios.get(url, {
+            params: {
+              access_token: pageToken,
+              since: startDate,
+              until: endDate,
+            },
+          });
+      
+          const data = response.data?.data?.[0];
+          if (data?.name === 'page_impressions_by_age_gender_unique') {
+            results[metric] = data?.values?.[0]?.value || {};
+          } else {
+            results[metric] = data?.values?.[0]?.value || 0;
+          }
+        } catch (error) {
+          console.error(`❌ Error al consultar métrica '${metric}':`, error.response?.data || error.message);
+          results[metric] = 'ERROR';
+        }
+      }
+  
+      // Obtener número de posts publicados
+      const postsResp = await axios.get(`https://graph.facebook.com/v19.0/${pageId}/posts`, {
+        params: {
+          access_token: pageToken,
+          since: startDate,
+          until: endDate,
+          fields: 'id',
+          limit: 100,
+        },
+      });
+  
+      results.page_posts = postsResp.data?.data?.length || 0;
+  
+      return {
+        cliente,
+        rango_fechas: `${startDate} a ${endDate}`,
+        seguidores_totales: results.page_fans,
+        nuevos_seguidores: results.page_fan_adds_unique,
+        publicaciones: results.page_posts,
+        likes_pagina: results.page_fan_adds_unique, // Meta ya no separa "likes" y "follows" en muchas cuentas
+        impresiones_totales: results.page_impressions,
+        alcance_total: results.page_impressions_unique,
+        alcance_por_genero_edad: results.page_impressions_by_age_gender_unique,
+      };
+    } catch (error) {
+      console.error('❌ Error al consultar Page Insights:', error.response?.data || error.message);
+      throw new InternalServerErrorException('Error al consultar métricas de la página de Facebook');
+    }
+  }
+
+
+
+
 }

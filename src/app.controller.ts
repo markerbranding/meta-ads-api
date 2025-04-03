@@ -33,4 +33,14 @@ export class AppController {
     return this.appService.getAdCreatives(cliente);
   }
 
+  // FanPage insights
+  @Get('page-insights/:cliente')
+  async getPageMetrics(
+    @Param('cliente') cliente: string,
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
+    return this.appService.getPageInsights(cliente, start, end);
+  }
+
 }
