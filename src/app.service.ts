@@ -249,31 +249,17 @@ export class AppService {
     }
   
     const { pageToken, pageId } = client;
-  
     const fechaLimite = dayjs().subtract(90, 'day').startOf('day');
     let startDate = dayjs(start || fechaLimite).startOf('month');
     const endDate = dayjs(end || dayjs()).endOf('month');
   
     let rangoAjustado = false;
-  
     if (startDate.isBefore(fechaLimite)) {
       startDate = fechaLimite;
       rangoAjustado = true;
     }
   
-    const monthlyData: {
-      cliente: string;
-      mes: string;
-      seguidores_totales: number | string;
-      nuevos_seguidores: number | string;
-      nuevos_seguidores_brutos: number | string;
-      publicaciones: number | string;
-      impresiones_totales: number | string;
-      impresiones_pagadas: number | string;
-      alcance_total: number | string;
-      alcance_pagado: number | string;
-      rango_ajustado?: boolean;
-    }[] = [];
+    const monthlyData: any[] = [];
   
     const getMetricLastValue = async (metric: string, since: string, until: string) => {
       try {
@@ -299,11 +285,8 @@ export class AppService {
         const response = await axios.get(url, {
           params: { access_token: pageToken, since, until },
         });
-    
         const values = response.data?.data?.[0]?.values;
-    
         if (!Array.isArray(values) || values.length === 0) return 'No disponible';
-    
         const total = values.reduce((sum, v) => {
           const val = v.value;
           if (typeof val === 'number') return sum + val;
@@ -314,7 +297,6 @@ export class AppService {
           }
           return sum;
         }, 0);
-    
         return total;
       } catch (error) {
         console.error(`❌ Métrica fallida '${metric}' (${since} - ${until}):`, error.response?.data || error.message);
@@ -341,7 +323,6 @@ export class AppService {
     };
   
     let current = startDate;
-  
     while (current.isBefore(endDate) || current.isSame(endDate, 'month')) {
       const since = current.startOf('month').format('YYYY-MM-DD');
       const until = current.endOf('month').format('YYYY-MM-DD');
@@ -366,6 +347,27 @@ export class AppService {
         getMonthlyPosts(since, until),
         getMetricSum('page_fan_adds', since, until)
       ]);
+
+
+
+      const getDemographicMetric = async (metric: string) => {
+        try {
+          const url = `https://graph.facebook.com/v19.0/${pageId}/insights/${metric}`;
+          const response = await axios.get(url, {
+            params: { access_token: pageToken },
+          });
+      
+          return response.data?.data?.[0]?.values?.[0]?.value || {};
+        } catch (error) {
+          console.error(`❌ Error en métrica demográfica '${metric}':`, error.response?.data || error.message);
+          return {};
+        }
+      };
+      
+      const [por_ciudad, por_pais] = await Promise.all([
+        getDemographicMetric('page_fans_city'),
+        getDemographicMetric('page_fans_country'),
+      ]);
   
       monthlyData.push({
         cliente,
@@ -379,13 +381,19 @@ export class AppService {
         alcance_total,
         alcance_pagado,
         ...(rangoAjustado && { rango_ajustado: true }),
+        seguidores_por_ciudad: por_ciudad,
+        seguidores_por_pais: por_pais,
       });
+  
+      // Métricas demográficas
+      
   
       current = current.add(1, 'month');
     }
   
     return monthlyData;
   }
+  
 
 
 
@@ -414,10 +422,10 @@ export class AppService {
   
       // 1️⃣ Guardamos el token en .env.generated
       const content = `# Actualizado el ${dayjs().format('YYYY-MM-DD')}
-  CLIENTE1_PAGE_TOKEN=${longLivedToken}
-  CLIENTE1_TOKEN_EXPIRES_AT=${expireDate}
-  # Expira el ${expireDate}
-  `;
+      CLIENTE1_PAGE_TOKEN=${longLivedToken}
+      CLIENTE1_TOKEN_EXPIRES_AT=${expireDate}
+      # Expira el ${expireDate}
+      `;
   
       const envPath = path.resolve(__dirname, '../.env.generated');
       fs.writeFileSync(envPath, content);
@@ -526,6 +534,76 @@ export class AppService {
       throw new Error('No se pudo actualizar Render');
     }
   }
+
+
+
+
+
+
+
+
+  // Ranking de posts en Facebook:
+  async getTopPostsByLikes(cliente: string, start?: string, end?: string) {
+    const clients = getMetaClients();
+    const client = clients[cliente];
+  
+    if (!client || !client.pageId || !client.pageToken) {
+      throw new NotFoundException(`Cliente '${cliente}' o 'pageId/pageToken' no encontrado`);
+    }
+  
+    const { pageToken, pageId } = client;
+  
+    const startDate = dayjs(start || dayjs().subtract(30, 'day')).format('YYYY-MM-DD');
+    const endDate = dayjs(end || dayjs()).format('YYYY-MM-DD');
+  
+    try {
+      const postsResponse = await axios.get(`https://graph.facebook.com/v19.0/${pageId}/posts`, {
+        params: {
+          access_token: pageToken,
+          since: startDate,
+          until: endDate,
+          fields: 'id,message,created_time,full_picture',
+          limit: 100,
+        },
+      });
+  
+      const posts = postsResponse.data?.data || [];
+  
+      const postsWithLikes = await Promise.all(
+        posts.map(async (post) => {
+          try {
+            const insightsRes = await axios.get(`https://graph.facebook.com/v19.0/${post.id}/insights/post_reactions_by_type_total`, {
+              params: { access_token: pageToken },
+            });
+  
+            const likeCount = insightsRes.data?.data?.[0]?.values?.[0]?.value?.like || 0;
+  
+            return {
+              id: post.id,
+              created_time: post.created_time,
+              message: post.message || '',
+              full_picture: post.full_picture || null,
+              likes_total: likeCount,
+            };
+          } catch (error) {
+            console.error(`Error al obtener likes para post ${post.id}:`, error.response?.data || error.message);
+            return null;
+          }
+        })
+      );
+  
+      const topPosts = postsWithLikes
+        .filter(Boolean)
+        .sort((a, b) => b.likes_total - a.likes_total)
+        .slice(0, 10);
+  
+      return topPosts;
+    } catch (error) {
+      console.error('Error al obtener publicaciones:', error.response?.data || error.message);
+      throw new InternalServerErrorException('No se pudieron obtener las publicaciones');
+    }
+  }
+  
 
 
 

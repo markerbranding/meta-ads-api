@@ -43,6 +43,12 @@ export class AppController {
     return this.appService.getPageInsights(cliente, start, end);
   }
 
+  // Ranking Facebook
+  @Get('fb-top-posts/:cliente')
+  async getTopPosts(@Param('cliente') cliente: string, @Query('start') start?: string, @Query('end') end?: string) {
+    return this.appService.getTopPostsByLikes(cliente, start, end);
+  }
+
   //  Automatizar Token
   @Get('ads/meta/refresh-page-token')
   async refreshPageToken() {
@@ -55,5 +61,6 @@ export class AppController {
   async testExchangeDirect() {
     return this.appService.exchangeToken();
   }
+
 
 }
