@@ -603,6 +603,123 @@ export class AppService {
       throw new InternalServerErrorException('No se pudieron obtener las publicaciones');
     }
   }
+
+
+
+
+
+  // Insights de Instagram:
+  async getInstagramInsights(cliente: string, start?: string, end?: string) {
+    const clients = getMetaClients();
+    const client = clients[cliente];
+  
+    if (!client || !client.instagramId || !client.pageToken) {
+      throw new NotFoundException(`Cliente '${cliente}' o 'instagramId/pageToken' no encontrado`);
+    }
+  
+    const { instagramId, pageToken } = client;
+  
+    const fechaLimite = dayjs().subtract(90, 'day').startOf('day');
+    let startDate = dayjs(start || fechaLimite).startOf('month');
+    const endDate = dayjs(end || dayjs()).endOf('month');
+  
+    let rangoAjustado = false;
+    if (startDate.isBefore(fechaLimite)) {
+      startDate = fechaLimite;
+      rangoAjustado = true;
+    }
+  
+    const monthlyData: any[] = [];
+  
+    const getMetricValue = async (metric: string, since: string, until: string) => {
+      try {
+        const url = `https://graph.facebook.com/v19.0/${instagramId}/insights`;
+        const response = await axios.get(url, {
+          params: {
+            metric,
+            period: 'day',
+            access_token: pageToken,
+            since,
+            until
+          },
+        });
+  
+        const values = response.data?.data?.[0]?.values;
+        if (Array.isArray(values)) {
+          return values.reduce((sum, v) => sum + (parseInt(v.value) || 0), 0);
+        }
+        return 'No disponible';
+      } catch (error) {
+        console.error(`❌ Métrica fallida '${metric}':`, error.response?.data || error.message);
+        return 'No disponible';
+      }
+    };
+  
+    const getDemographics = async (metric: string) => {
+      try {
+        const url = `https://graph.facebook.com/v19.0/${instagramId}/insights`;
+        const res = await axios.get(url, {
+          params: {
+            metric,
+            period: 'lifetime',
+            access_token: pageToken,
+          },
+        });
+  
+        return res.data?.data?.[0]?.values?.[0]?.value || {};
+      } catch (error) {
+        console.error(`❌ Error en métrica demográfica '${metric}':`, error.response?.data || error.message);
+        return {};
+      }
+    };
+  
+    let current = startDate;
+  
+    while (current.isBefore(endDate) || current.isSame(endDate, 'month')) {
+      const since = current.startOf('month').format('YYYY-MM-DD');
+      const until = current.endOf('month').format('YYYY-MM-DD');
+      const mes = current.format('YYYY-MM');
+  
+      const [
+        alcance,
+        impresiones,
+        vistas_perfil,
+        nuevos_seguidores,
+        publicaciones,
+        seguidores_totales
+      ] = await Promise.all([
+        getMetricValue('reach', since, until),
+        getMetricValue('impressions', since, until),
+        getMetricValue('profile_views', since, until),
+        getMetricValue('follower_count', since, until),
+        getMetricValue('media_count', since, until),
+        getMetricValue('follower_count', since, until) // último día del mes
+      ]);
+  
+      const seguidores_por_pais = await getDemographics('audience_country');
+      const seguidores_por_ciudad = await getDemographics('audience_city');
+  
+      monthlyData.push({
+        cliente,
+        mes,
+        alcance,
+        impresiones,
+        vistas_perfil,
+        nuevos_seguidores,
+        publicaciones,
+        seguidores_totales,
+        seguidores_por_pais,
+        seguidores_por_ciudad,
+        ...(rangoAjustado && { rango_ajustado: true }),
+      });
+  
+      current = current.add(1, 'month');
+    }
+  
+    return monthlyData;
+  }
+  
+  
   
 
 

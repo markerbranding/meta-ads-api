@@ -63,4 +63,11 @@ export class AppController {
   }
 
 
+  // Insights Instagram
+  @Get('instagram-insights/:cliente')
+  async getInstagramMonthly(@Param('cliente') cliente: string, @Query('start') start?: string, @Query('end') end?: string) {
+    return this.appService.getInstagramInsights(cliente, start, end);
+  }
+
+
 }
