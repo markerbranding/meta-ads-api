@@ -612,112 +612,243 @@ export class AppService {
   async getInstagramInsights(cliente: string, start?: string, end?: string) {
     const clients = getMetaClients();
     const client = clients[cliente];
-  
+
     if (!client || !client.instagramId || !client.pageToken) {
       throw new NotFoundException(`Cliente '${cliente}' o 'instagramId/pageToken' no encontrado`);
     }
-  
+
     const { instagramId, pageToken } = client;
-  
-    const fechaLimite = dayjs().subtract(90, 'day').startOf('day');
+
+    const fechaLimite = dayjs().subtract(30, 'day').startOf('day');
     let startDate = dayjs(start || fechaLimite).startOf('month');
     const endDate = dayjs(end || dayjs()).endOf('month');
-  
+
     let rangoAjustado = false;
+
     if (startDate.isBefore(fechaLimite)) {
       startDate = fechaLimite;
       rangoAjustado = true;
     }
-  
-    const monthlyData: any[] = [];
-  
-    const getMetricValue = async (metric: string, since: string, until: string) => {
-      try {
-        const url = `https://graph.facebook.com/v19.0/${instagramId}/insights`;
-        const response = await axios.get(url, {
-          params: {
-            metric,
-            period: 'day',
-            access_token: pageToken,
-            since,
-            until
-          },
-        });
-  
-        const values = response.data?.data?.[0]?.values;
-        if (Array.isArray(values)) {
-          return values.reduce((sum, v) => sum + (parseInt(v.value) || 0), 0);
-        }
-        return 'No disponible';
-      } catch (error) {
-        console.error(`❌ Métrica fallida '${metric}':`, error.response?.data || error.message);
-        return 'No disponible';
-      }
-    };
-  
-    const getDemographics = async (metric: string) => {
-      try {
-        const url = `https://graph.facebook.com/v19.0/${instagramId}/insights`;
-        const res = await axios.get(url, {
-          params: {
-            metric,
-            period: 'lifetime',
-            access_token: pageToken,
-          },
-        });
-  
-        return res.data?.data?.[0]?.values?.[0]?.value || {};
-      } catch (error) {
-        console.error(`❌ Error en métrica demográfica '${metric}':`, error.response?.data || error.message);
-        return {};
-      }
-    };
-  
-    let current = startDate;
-  
-    while (current.isBefore(endDate) || current.isSame(endDate, 'month')) {
-      const since = current.startOf('month').format('YYYY-MM-DD');
-      const until = current.endOf('month').format('YYYY-MM-DD');
-      const mes = current.format('YYYY-MM');
-  
-      const [
-        alcance,
-        impresiones,
-        vistas_perfil,
-        nuevos_seguidores,
-        publicaciones,
-        seguidores_totales
-      ] = await Promise.all([
-        getMetricValue('reach', since, until),
-        getMetricValue('impressions', since, until),
-        getMetricValue('profile_views', since, until),
-        getMetricValue('follower_count', since, until),
-        getMetricValue('media_count', since, until),
-        getMetricValue('follower_count', since, until) // último día del mes
-      ]);
-  
-      const seguidores_por_pais = await getDemographics('audience_country');
-      const seguidores_por_ciudad = await getDemographics('audience_city');
-  
+
+    const monthlyData: {
+      cliente: string;
+      mes: string;
+      alcance: number | string;
+      interacciones: number | string;
+      seguidores_totales: number | string;
+      nuevos_seguidores: number | string;
+      seguidores_perdidos: number | string;
+      seguidores_por_pais: Record<string, number>;
+      seguidores_por_ciudad: Record<string, number>;
+      rango_ajustado?: boolean;
+    }[] = [];
+
+    while (startDate.isBefore(endDate) || startDate.isSame(endDate, 'month')) {
+      const since = startDate.startOf('month').format('YYYY-MM-DD');
+      const until = startDate.endOf('month').format('YYYY-MM-DD');
+      const mes = startDate.format('YYYY-MM');
+    
+      const alcance = await getMetric('reach', since, until);
+      const interacciones = await getMetric('accounts_engaged', since, until, 'total_value');
+      const seguidores_totales = await getInstagramFollowersCount(instagramId, pageToken);
+      const seguidores_por_pais = await getDemographics(instagramId, pageToken, 'country');
+      const seguidores_por_ciudad = await getDemographics(instagramId, pageToken, 'city');
+      const nuevos_seguidores = await getMetricSum('follows_and_unfollows', since, until, 'total_value', 'follows');
+      const seguidores_perdidos = await getMetricSum('follows_and_unfollows', since, until, 'total_value', 'unfollows');
+    
       monthlyData.push({
         cliente,
         mes,
         alcance,
-        impresiones,
-        vistas_perfil,
-        nuevos_seguidores,
-        publicaciones,
+        interacciones,
         seguidores_totales,
+        nuevos_seguidores,
+        seguidores_perdidos,
         seguidores_por_pais,
         seguidores_por_ciudad,
         ...(rangoAjustado && { rango_ajustado: true }),
       });
-  
-      current = current.add(1, 'month');
+    
+      startDate = startDate.add(1, 'month');
     }
-  
+
     return monthlyData;
+
+    // Auxiliares internas
+    async function getMetric(metric: string, since: string, until: string, metricType?: string) {
+      try {
+        const params: any = {
+          metric,
+          period: 'day',
+          since,
+          until,
+          access_token: pageToken,
+        };
+
+        if (metricType) {
+          params.metric_type = metricType;
+        }
+
+        const url = `https://graph.facebook.com/v19.0/${instagramId}/insights`;
+        const res = await axios.get(url, { params });
+
+        const value = res.data?.data?.[0]?.values?.[0]?.value;
+        return value ?? 'No disponible';
+      } catch (error) {
+        console.error(`❌ Métrica fallida '${metric}':`, error.response?.data || error.message);
+        return 'No disponible';
+      }
+    }
+
+
+    async function getMetricSum(metric: string, since: string, until: string, metricType: string, fieldToSum: string) {
+  try {
+    const url = `https://graph.facebook.com/v19.0/${instagramId}/insights`;
+    const res = await axios.get(url, {
+      params: {
+        metric,
+        since,
+        until,
+        period: 'day',
+        metric_type: metricType,
+        access_token: pageToken,
+      },
+    });
+
+    const values = res.data?.data?.[0]?.values;
+
+    if (!Array.isArray(values)) return 0;
+
+    const total = values.reduce((acc, entry) => {
+      const val = entry.value?.[fieldToSum];
+      return acc + (typeof val === 'number' ? val : 0);
+    }, 0);
+
+    return total;
+  } catch (error) {
+    console.error(`❌ Error en getMetricSum para '${metric}' (${fieldToSum}):`, error.response?.data || error.message);
+    return 0; // ← devolvemos cero si no hay data
   }
+}
+
+
+    async function getInstagramFollowersCount(id: string, token: string) {
+      try {
+        const url = `https://graph.facebook.com/v19.0/${id}?fields=followers_count&access_token=${token}`;
+        const res = await axios.get(url);
+        return res.data?.followers_count ?? 'No disponible';
+      } catch (error) {
+        console.error('❌ Error al obtener seguidores totales:', error.response?.data || error.message);
+        return 'No disponible';
+      }
+    }
+
+    async function getDemographics(id: string, token: string, tipo: 'country' | 'city') {
+      try {
+        const res = await axios.get(`https://graph.facebook.com/v19.0/${id}/insights`, {
+          params: {
+            metric: 'follower_demographics',
+            metric_type: 'total_value',
+            breakdown: tipo,
+            period: 'lifetime',
+            access_token: token,
+          },
+        });
+    
+        const results = res.data?.data?.[0]?.total_value?.breakdowns?.[0]?.results;
+    
+        if (!Array.isArray(results)) return {};
+    
+        const formatted: Record<string, number> = {};
+        for (const item of results) {
+          const key = item.dimension_values?.[0];
+          const value = item.value;
+          if (key && typeof value === 'number') {
+            formatted[key] = value;
+          }
+        }
+    
+        return formatted;
+      } catch (error) {
+        console.error(`❌ Error en métrica demográfica '${tipo}':`, error.response?.data || error.message);
+        return {};
+      }
+    }
+
+  }
+
+
+
+
+
+  // Ranking Posts de Instagram:
+  async getTopInstagramPosts(cliente: string, start?: string, end?: string) {
+    const clients = getMetaClients();
+    const client = clients[cliente];
+
+    if (!client || !client.instagramId || !client.pageToken) {
+      throw new NotFoundException(`Cliente '${cliente}' o 'instagramId/pageToken' no encontrado`);
+    }
+
+    const { instagramId, pageToken } = client;
+
+    const startDate = dayjs(start || dayjs().subtract(30, 'day')).format('YYYY-MM-DD');
+    const endDate = dayjs(end || dayjs()).format('YYYY-MM-DD');
+
+    try {
+      const mediaResponse = await axios.get(`https://graph.facebook.com/v19.0/${instagramId}/media`, {
+        params: {
+          access_token: pageToken,
+          fields: 'id,caption,media_type,media_url,timestamp',
+          since: startDate,
+          until: endDate,
+          limit: 100,
+        },
+      });
+
+      const mediaItems = mediaResponse.data?.data || [];
+
+      const postsWithMetrics = await Promise.all(
+        mediaItems.map(async (media) => {
+          try {
+            const metricsRes = await axios.get(`https://graph.facebook.com/v19.0/${media.id}/insights`, {
+              params: {
+                metric: 'likes,comments',
+                access_token: pageToken,
+              },
+            });
+
+            const metrics = metricsRes.data?.data || [];
+            const likes = metrics.find(m => m.name === 'likes')?.values?.[0]?.value || 0;
+            const comments = metrics.find(m => m.name === 'comments')?.values?.[0]?.value || 0;
+
+            return {
+              id: media.id,
+              caption: media.caption || '',
+              media_url: media.media_url || '',
+              timestamp: media.timestamp,
+              likes,
+              comments,
+            };
+          } catch (err) {
+            console.warn(`⚠️ No se pudo obtener insights de ${media.id}`);
+            return null;
+          }
+        })
+      );
+
+      const topPosts = postsWithMetrics
+        .filter(Boolean)
+        .sort((a, b) => b.likes - a.likes)
+        .slice(0, 10);
+
+      return topPosts;
+    } catch (error) {
+      console.error('❌ Error al obtener publicaciones de Instagram:', error.response?.data || error.message);
+      throw new InternalServerErrorException('No se pudieron obtener los posts de Instagram');
+    }
+}
+
   
   
   
@@ -726,3 +857,4 @@ export class AppService {
 
 
 }
+

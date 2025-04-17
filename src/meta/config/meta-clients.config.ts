@@ -6,6 +6,6 @@ export const getMetaClients = () => ({
     pageToken: process.env.CLIENTE1_PAGE_TOKEN,
     tokenExpiresAt: process.env.CLIENTE1_TOKEN_EXPIRES_AT,
     notifyEmail: process.env.CLIENTE1_NOTIFY_EMAIL,
-    instagramBusinessId: process.env.CLIENTE1_IG_ID,
+    instagramId: process.env.CLIENTE1_INSTAGRAM_ID,
   },
 });

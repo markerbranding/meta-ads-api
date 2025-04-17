@@ -69,5 +69,16 @@ export class AppController {
     return this.appService.getInstagramInsights(cliente, start, end);
   }
 
+  // Ranking Instagram
+  // src/app.controller.ts
+  @Get('ig-top-posts/:cliente')
+  async getInstagramTopPosts(
+    @Param('cliente') cliente: string,
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
+    return this.appService.getTopInstagramPosts(cliente, start, end);
+  }
+
 
 }
